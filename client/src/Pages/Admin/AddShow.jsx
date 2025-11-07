@@ -1,63 +1,122 @@
 import React, { useEffect, useState } from 'react'
-import { dummyShowsData } from '../../assets/assets'
 import Loading from '../../components/Loading'
 import Title from '../../components/Admin/Title'
 import { CheckIcon, DeleteIcon, StarIcon } from 'lucide-react'
 import { kConverter } from '../../lib/KConverter'
+import { useAppContext } from '../../context/AppContext'
+import toast from 'react-hot-toast'
 
 const AddShow = () => {
+  const { axios, getToken, user, imafe_base_url } = useAppContext()
   const currency = import.meta.env.VITE_CURRENCY || '$'
+
   const [nowPlayingMovies, setNowPlayingMovies] = useState([])
   const [selectedMovie, setSelectedMovie] = useState(null)
   const [dateTimeSelection, setDateTimeSelection] = useState({})
   const [dateTimeInput, setDateTimeInput] = useState('')
   const [showPrice, setShowPrice] = useState('')
+  const [addingShow, setAddingShow] = useState(false)
 
+  // Fetch now playing movies
   const fetchNowPlayingMovies = async () => {
-    setNowPlayingMovies(dummyShowsData)
+    try {
+      const { data } = await axios.get('/api/show/now-playing', {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      })
+      if (data.success) {
+        setNowPlayingMovies(data.movies)
+      }
+    } catch (error) {
+      console.error('Error fetching movies:', error)
+    }
   }
 
+  useEffect(() => {
+    if (user) fetchNowPlayingMovies()
+  }, [user])
+
+  // Add date-time
   const handleDateTimeAdd = () => {
     if (!dateTimeInput) return
     const [date, time] = dateTimeInput.split('T')
     if (!date || !time) return
 
-    setDateTimeSelection((prev) => {
+    setDateTimeSelection(prev => {
       const times = prev[date] || []
       if (!times.includes(time)) {
         return { ...prev, [date]: [...times, time] }
       }
       return prev
     })
+
+    setDateTimeInput('')
   }
 
+  // Remove time
   const handleRemoveTime = (date, time) => {
-    setDateTimeSelection((prev) => {
-      const filteredTimes = prev[date].filter((t) => t !== time)
+    setDateTimeSelection(prev => {
+      const filteredTimes = prev[date].filter(t => t !== time)
       if (filteredTimes.length === 0) {
         const { [date]: _, ...rest } = prev
         return rest
       }
-      return {
-        ...prev,
-        [date]: filteredTimes,
-      }
+      return { ...prev, [date]: filteredTimes }
     })
   }
 
-  useEffect(() => {
-    fetchNowPlayingMovies()
-  }, [])
+  // Submit show
+  const handleSubmit = async () => {
+    try {
+      setAddingShow(true)
 
-  return nowPlayingMovies.length > 0 ? (
+      // Auto add current date-time input if not added yet
+      if (dateTimeInput) handleDateTimeAdd()
+
+      if (!selectedMovie || Object.keys(dateTimeSelection).length === 0 || !showPrice) {
+        toast.error("Missing required fields")
+        setAddingShow(false)
+        return
+      }
+
+      const showInput = Object.entries(dateTimeSelection).map(([date, times]) => ({
+        date,
+        time: times
+      }))
+
+      const payload = {
+        movieId: selectedMovie,
+        showInput,
+        showPrice: Number(showPrice)
+      }
+
+      const { data } = await axios.post('/api/show/add', payload, {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      })
+
+      if (data.success) {
+        toast.success(data.message)
+        setSelectedMovie(null)
+        setDateTimeSelection({})
+        setDateTimeInput('')
+        setShowPrice('')
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error("An error occurred, please try again")
+    }
+    setAddingShow(false)
+  }
+
+  if (!nowPlayingMovies.length) return <Loading />
+
+  return (
     <>
       <Title text1="Add" text2="Show" />
-      <p className="mt-10 text-lg font-medium">Now Playing Movies</p>
 
-      {/* scroll bar for small screens */}
+      <p className="mt-10 text-lg font-medium">Now Playing Movies</p>
       <div className="overflow-x-auto pb-4">
         <div className="group flex flex-wrap gap-4 mt-4 w-max">
-          {nowPlayingMovies.map((movie) => (
+          {nowPlayingMovies.map(movie => (
             <div
               key={movie._id}
               className={`relative max-w-40 cursor-pointer transition duration-300 group-hover:opacity-40 hover:!opacity-100 hover:-translate-y-1`}
@@ -65,7 +124,7 @@ const AddShow = () => {
             >
               <div className="relative rounded-lg overflow-hidden">
                 <img
-                  src={movie.poster_path}
+                  src={imafe_base_url + movie.poster_path}
                   alt={movie.title}
                   className="w-full object-cover brightness-90"
                 />
@@ -90,7 +149,7 @@ const AddShow = () => {
         </div>
       </div>
 
-      {/* Show Price Input */}
+      {/* Show Price */}
       <div className="mt-8">
         <label className="block text-sm font-medium mb-2">Show Price</label>
         <div className="inline-flex items-center gap-2 border border-gray-600 px-3 py-2 rounded-md">
@@ -99,33 +158,42 @@ const AddShow = () => {
             type="number"
             min={0}
             value={showPrice}
-            onChange={(e) => setShowPrice(e.target.value)}
+            onChange={e => setShowPrice(e.target.value)}
             placeholder="Enter Show Price"
             className="outline-none"
           />
         </div>
       </div>
 
-      {/* Date and Time Selection */}
+      {/* Date-Time Selection */}
       <div className="mt-5">
         <label className="block text-sm font-medium mb-2">Select Date and Time</label>
-        <div className="inline-flex gap-5 border border-gray-600 p-1 rounded-lg">
+        <div className="inline-flex gap-3 border border-gray-600 p-1 rounded-lg">
           <input
             type="datetime-local"
             value={dateTimeInput}
-            onChange={(e) => setDateTimeInput(e.target.value)}
+            onChange={e => setDateTimeInput(e.target.value)}
             className="outline-none rounded-md"
           />
           <button
+            type="button"
             onClick={handleDateTimeAdd}
-            className="bg-primary/80 text-white px-3 py-3 text-sm rounded-lg hover:bg-primary cursor-pointer"
+            className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700"
           >
             Add Time
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={addingShow}
+            className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700"
+          >
+            Add Show
           </button>
         </div>
       </div>
 
-      {/* Display selected Time */}
+      {/* Display selected Date-Time */}
       {Object.keys(dateTimeSelection).length > 0 && (
         <div className="mt-6">
           <h2 className="mb-2 font-medium">Selected Date-Time</h2>
@@ -134,7 +202,7 @@ const AddShow = () => {
               <li key={date}>
                 <div className="font-medium">{date}</div>
                 <div className="flex flex-wrap gap-2 mt-1 text-sm">
-                  {times.map((time) => (
+                  {times.map(time => (
                     <div
                       key={time}
                       className="border border-primary px-2 py-1 flex items-center rounded"
@@ -154,8 +222,6 @@ const AddShow = () => {
         </div>
       )}
     </>
-  ) : (
-    <Loading />
   )
 }
 
